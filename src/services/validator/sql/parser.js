@@ -208,6 +208,18 @@ class RDPParser {
     } else if (this.match(TokenTypes.KEYWORD, 'DELETE')) {
        this.parseDelete();
     } else if (this.match(TokenTypes.KEYWORD, 'CREATE') || this.match(TokenTypes.KEYWORD, 'ALTER') || this.match(TokenTypes.KEYWORD, 'DROP') || this.match(TokenTypes.KEYWORD, 'TRUNCATE')) {
+       const ddlCmd = t.value.toUpperCase();
+       // Must have at least two tokens after DDL keyword (e.g., TABLE nombre_tabla)
+       const nextT = this.peek();
+       const nextNextT = this.tokens[this.pos] ? this.tokens[this.pos + 1] : null;
+       
+       if (nextT.type === TokenTypes.EOF || (nextT.type === TokenTypes.PUNCTUATION && nextT.value === ';') ||
+           !nextNextT || nextNextT.type === TokenTypes.EOF || (nextNextT.type === TokenTypes.PUNCTUATION && nextNextT.value === ';')) {
+          this.reportError(`Motor: ${this.engine}`, nextT,
+            'Nombre de objeto',
+            `${ddlCmd} requiere un tipo de objeto y un nombre (ej. ${ddlCmd} TABLE nombre_tabla)`);
+          throw new Error('ParseError');
+       }
        while(this.peek().type !== TokenTypes.EOF && !(this.peek().type === TokenTypes.PUNCTUATION && this.peek().value === ';')) {
           this.advance();
        }
@@ -315,14 +327,34 @@ class RDPParser {
           if (!this.match(TokenTypes.IDENTIFIER) && !this.match(TokenTypes.STRING)) {
               this.expect(TokenTypes.IDENTIFIER, null, 'Alias válido');
           }
-       } else if (this.peek().type === TokenTypes.IDENTIFIER || this.peek().type === TokenTypes.STRING) {
+       } else if (this.peek().type === TokenTypes.STRING) {
+          // Implicit alias with string is usually okay (e.g., SELECT col 'Alias')
+          this.advance();
+       } else if (this.peek().type === TokenTypes.IDENTIFIER) {
           const t = this.peek();
           const sim = findSimilarKeyword(t.value);
           if (sim === 'FROM' && this.tokens[this.pos + 1] && (this.tokens[this.pos + 1].type === TokenTypes.IDENTIFIER || this.tokens[this.pos + 1].type === TokenTypes.KEYWORD)) {
              this.reportError(`Motor: ${this.engine}`, t, 'FROM', `Quizás quiso escribir FROM`);
              throw new Error('ParseError');
           }
-          this.advance(); // Implicit alias
+          // Strict validation: Reject implicit identifier aliases to catch missing commas.
+          // e.g. "SELECT nombre direccion" -> missing comma between nombre and direccion.
+          this.reportError(`Motor: ${this.engine}`, t,
+             'Coma (,) o AS',
+             `Identificadores consecutivos detectados. Falta una coma antes de "${t.value}" o use 'AS' para alias.`);
+          throw new Error('ParseError');
+       }
+       // After expression + optional alias: if next is a plain identifier (not keyword, not comma)
+       // that means consecutive columns without comma separator
+       if (this.peek().type === TokenTypes.IDENTIFIER) {
+          const nextT = this.peek();
+          const nextSim = findSimilarKeyword(nextT.value);
+          if (!nextSim) {
+             this.reportError(`Motor: ${this.engine}`, nextT,
+               'Coma (,) o FROM',
+               `Identificadores consecutivos sin separador. Falta una coma antes de "${nextT.value}".`);
+             throw new Error('ParseError');
+          }
        }
     } while (this.match(TokenTypes.PUNCTUATION, ','));
   }
@@ -506,6 +538,18 @@ class RDPParser {
         if (t.type === TokenTypes.IDENTIFIER) {
             const sim = findSimilarKeyword(t.value);
             if (sim) break; 
+        }
+        
+        if (count > 0 && [TokenTypes.IDENTIFIER, TokenTypes.STRING, TokenTypes.NUMBER, TokenTypes.DATA_TYPE].includes(t.type)) {
+            const prev = this.tokens[this.pos - 1];
+            if (prev) {
+                if (![TokenTypes.OPERATOR, TokenTypes.KEYWORD, TokenTypes.DOT, TokenTypes.DOUBLECOLON].includes(prev.type) && prev.value !== '(' && prev.value !== ',') {
+                    break;
+                }
+                if (prev.type === TokenTypes.KEYWORD && ['NULL', 'TRUE', 'FALSE'].includes(prev.value.toUpperCase())) {
+                    break;
+                }
+            }
         }
         
         if (t.type === TokenTypes.FUNCTION) {

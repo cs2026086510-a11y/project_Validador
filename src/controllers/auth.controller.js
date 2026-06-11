@@ -61,7 +61,7 @@ const login = async (req, res) => {
       return res.status(400).json({ error: 'Correo y contraseña son requeridos' });
     }
 
-    const result = await db.query('SELECT * FROM users WHERE email = $1', [email]);
+    const result = await db.query('SELECT * FROM users WHERE email = $1 AND activo = true', [email]);
     const user = result.rows[0];
     
     if (!user || !user.password_hash) {
@@ -125,6 +125,12 @@ const adminLogin = async (req, res) => {
     await db.query('UPDATE admins SET last_login = CURRENT_TIMESTAMP WHERE id = $1', [admin.id]);
 
     const ipAddress = req.ip || req.connection.remoteAddress;
+
+    // Reconocimiento automático del SUPERADMIN inicial
+    if (process.env.ADMIN_EMAIL && admin.correo === process.env.ADMIN_EMAIL) {
+      admin.rol = 'superadmin';
+    }
+
     const token = generateToken(admin.id, admin.correo, admin.rol);
 
     await db.query(

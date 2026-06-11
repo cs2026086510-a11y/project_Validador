@@ -205,6 +205,16 @@ async function loadLogs(filter) {
   }
 }
 
+// ── ROLE CHECK ──
+const isSuperAdmin = () => sessionStorage.getItem('admin_role') === 'superadmin';
+
+document.addEventListener('DOMContentLoaded', async () => {
+  if (isSuperAdmin()) {
+    document.getElementById('btn-create-admin').hidden = false;
+    document.querySelectorAll('.col-acciones').forEach(el => el.hidden = false);
+  }
+});
+
 // ── LOAD ADMINS ──
 async function loadAdmins() {
   const tbody = document.getElementById('admins-tbody');
@@ -220,12 +230,30 @@ async function loadAdmins() {
       const tr = document.createElement('tr');
       const statusClass = a.activo ? 'active-admin' : 'inactive';
       const statusText = a.activo ? 'Activo' : 'Inactivo';
+      
+      let actionsHTML = '';
+      if (isSuperAdmin()) {
+        const toggleAction = a.activo ? 'Desactivar' : 'Reactivar';
+        const toggleMethod = a.activo ? 'deactivate' : 'reactivate';
+        const roleAction = a.rol === 'admin' ? 'Hacer SuperAdmin' : 'Hacer Admin';
+        const newRole = a.rol === 'admin' ? 'superadmin' : 'admin';
+        
+        actionsHTML = `
+          <td>
+            <button class="adm-btn adm-btn-ghost" style="padding:4px 8px;font-size:12px;" onclick="toggleAdmin('${a.id}', '${toggleMethod}')">${toggleAction}</button>
+            <button class="adm-btn adm-btn-ghost" style="padding:4px 8px;font-size:12px;" onclick="changeAdminRole('${a.id}', '${newRole}')">${roleAction}</button>
+            <button class="adm-btn adm-btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteAdmin('${a.id}')">Eliminar</button>
+          </td>
+        `;
+      }
+
       tr.innerHTML = `
         <td style="font-weight:500;color:var(--adm-white);">${a.nombre}</td>
         <td>${a.correo}</td>
         <td><span class="adm-badge adm-badge-admin">${(a.rol || 'admin').toUpperCase()}</span></td>
         <td><span class="adm-status"><span class="adm-status-dot ${statusClass}"></span>${statusText}</span></td>
         <td style="font-size:12px;color:var(--adm-text2);">${formatDate(a.last_login)}</td>
+        ${actionsHTML}
       `;
       tbody.appendChild(tr);
     });
@@ -252,12 +280,28 @@ async function loadUsers() {
       const isOnline = u.is_online;
       const statusClass = isOnline ? 'online' : 'offline';
       const statusText = isOnline ? 'En línea' : 'Desconectado';
+      const activoText = u.activo === false ? ' (Desactivado)' : '';
+      
+      let actionsHTML = '';
+      if (isSuperAdmin()) {
+        const toggleAction = u.activo !== false ? 'Desactivar' : 'Reactivar';
+        const toggleMethod = u.activo !== false ? 'deactivate' : 'reactivate';
+        
+        actionsHTML = `
+          <td>
+            <button class="adm-btn adm-btn-ghost" style="padding:4px 8px;font-size:12px;" onclick="toggleUser('${u.id}', '${toggleMethod}')">${toggleAction}</button>
+            <button class="adm-btn adm-btn-danger" style="padding:4px 8px;font-size:12px;" onclick="deleteUser('${u.id}')">Eliminar</button>
+          </td>
+        `;
+      }
+
       tr.innerHTML = `
         <td style="font-weight:500;color:var(--adm-white);">${u.name || '—'}</td>
         <td>${u.email}</td>
         <td style="font-size:12px;color:var(--adm-text2);">${formatDate(u.last_login)}</td>
         <td style="font-size:12px;color:var(--adm-text2);">${formatDate(u.created_at)}</td>
-        <td><span class="adm-status"><span class="adm-status-dot ${statusClass}"></span>${statusText}</span></td>
+        <td><span class="adm-status"><span class="adm-status-dot ${u.activo === false ? 'inactive' : statusClass}"></span>${statusText}${activoText}</span></td>
+        ${actionsHTML}
       `;
       tbody.appendChild(tr);
     });
@@ -267,3 +311,39 @@ async function loadUsers() {
     empty.textContent = 'No fue posible cargar la información';
   }
 }
+
+// ── ACTIONS (SUPERADMIN ONLY) ──
+window.toggleAdmin = async (id, method) => {
+  if (!confirm(`¿Estás seguro de ${method === 'deactivate' ? 'desactivar' : 'reactivar'} este administrador?`)) return;
+  const res = await apiFetch(`/admin/admins/${id}/${method}`, { method: 'PUT' });
+  if (res && res.ok) { showToast('Operación exitosa'); loadAdmins(); loadAudit(); loadLogs('ADMIN'); }
+  else if (res) { const data = await res.json(); alert(data.error); }
+};
+
+window.changeAdminRole = async (id, rol) => {
+  if (!confirm(`¿Cambiar rol a ${rol.toUpperCase()}?`)) return;
+  const res = await apiFetch(`/admin/admins/${id}/role`, { method: 'PUT', body: JSON.stringify({ rol }) });
+  if (res && res.ok) { showToast('Rol actualizado'); loadAdmins(); loadAudit(); loadLogs('ADMIN'); }
+  else if (res) { const data = await res.json(); alert(data.error); }
+};
+
+window.deleteAdmin = async (id) => {
+  if (!confirm('¿Eliminar administrador DEFINITIVAMENTE?')) return;
+  const res = await apiFetch(`/admin/admins/${id}`, { method: 'DELETE' });
+  if (res && res.ok) { showToast('Administrador eliminado'); loadAdmins(); loadAudit(); loadLogs('ADMIN'); }
+  else if (res) { const data = await res.json(); alert(data.error); }
+};
+
+window.toggleUser = async (id, method) => {
+  if (!confirm(`¿Estás seguro de ${method === 'deactivate' ? 'desactivar' : 'reactivar'} este usuario?`)) return;
+  const res = await apiFetch(`/admin/users/${id}/${method}`, { method: 'PUT' });
+  if (res && res.ok) { showToast('Operación exitosa'); loadUsers(); loadAudit(); loadLogs('ADMIN'); }
+  else if (res) { const data = await res.json(); alert(data.error); }
+};
+
+window.deleteUser = async (id) => {
+  if (!confirm('¿Eliminar usuario DEFINITIVAMENTE?')) return;
+  const res = await apiFetch(`/admin/users/${id}`, { method: 'DELETE' });
+  if (res && res.ok) { showToast('Usuario eliminado'); loadUsers(); loadStats(); loadAudit(); loadLogs('ADMIN'); }
+  else if (res) { const data = await res.json(); alert(data.error); }
+};

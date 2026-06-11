@@ -144,7 +144,7 @@ const searchUserByEmail = async (req, res) => {
 
 const getTotalUsers = async (req, res) => {
   try {
-    const result = await db.query('SELECT id, name, email, role, created_at, last_login, last_activity, is_online FROM users ORDER BY created_at DESC');
+    const result = await db.query('SELECT id, name, email, role, created_at, last_login, last_activity, is_online, activo FROM users ORDER BY created_at DESC');
     res.json(result.rows);
   } catch (err) {
     console.error('Error obteniendo usuarios:', err);
@@ -197,8 +197,15 @@ const deactivateAdmin = async (req, res) => {
     
     const target = await db.query('SELECT correo, rol FROM admins WHERE id = $1', [id]);
     if (!target.rows[0]) return res.status(404).json({ error: 'No encontrado' });
-    if (target.rows[0].rol === 'superadmin' || target.rows[0].correo === req.user.email) {
-      return res.status(403).json({ error: 'No se puede desactivar este administrador' });
+    if (target.rows[0].correo === req.user.email) {
+      return res.status(403).json({ error: 'Un SUPERADMIN no puede desactivarse a sí mismo' });
+    }
+
+    if (target.rows[0].rol === 'superadmin') {
+       const countRes = await db.query("SELECT COUNT(*) as cnt FROM admins WHERE rol = 'superadmin' AND activo = true");
+       if (parseInt(countRes.rows[0].cnt, 10) <= 1) {
+          return res.status(403).json({ error: 'Debe existir siempre al menos un SUPERADMIN activo' });
+       }
     }
 
     await db.query('UPDATE admins SET activo = false WHERE id = $1', [id]);
@@ -215,6 +222,159 @@ const deactivateAdmin = async (req, res) => {
   }
 };
 
+const deleteAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    
+    const target = await db.query('SELECT correo, rol FROM admins WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'No encontrado' });
+    
+    if (target.rows[0].correo === req.user.email) {
+      return res.status(403).json({ error: 'Un SUPERADMIN no puede eliminarse a sí mismo' });
+    }
+
+    if (target.rows[0].rol === 'superadmin') {
+       const countRes = await db.query("SELECT COUNT(*) as cnt FROM admins WHERE rol = 'superadmin'");
+       if (parseInt(countRes.rows[0].cnt, 10) <= 1) {
+          return res.status(403).json({ error: 'Debe existir siempre al menos un SUPERADMIN' });
+       }
+    }
+
+    await db.query('DELETE FROM admins WHERE id = $1', [id]);
+    
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    await db.query(
+      'INSERT INTO audit_logs (usuario, accion, detalles, ip) VALUES ($1, $2, $3, $4)',
+      [req.user.email, 'DELETE_ADMIN', `Administrador eliminado: ${target.rows[0].correo}`, ipAddress]
+    );
+
+    res.json({ message: 'Administrador eliminado exitosamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al eliminar administrador' });
+  }
+};
+
+const deactivateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    
+    const target = await db.query('SELECT email FROM users WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    await db.query('UPDATE users SET activo = false WHERE id = $1', [id]);
+    await db.query('DELETE FROM active_sessions WHERE user_id = $1', [id]);
+
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    await db.query(
+      'INSERT INTO audit_logs (usuario, accion, detalles, ip) VALUES ($1, $2, $3, $4)',
+      [req.user.email, 'DEACTIVATE_USER', `Usuario desactivado: ${target.rows[0].email}`, ipAddress]
+    );
+
+    res.json({ message: 'Usuario desactivado exitosamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al desactivar usuario' });
+  }
+};
+
+const reactivateAdmin = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    
+    const target = await db.query('SELECT correo FROM admins WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'No encontrado' });
+
+    await db.query('UPDATE admins SET activo = true WHERE id = $1', [id]);
+    
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    await db.query(
+      'INSERT INTO audit_logs (usuario, accion, detalles, ip) VALUES ($1, $2, $3, $4)',
+      [req.user.email, 'REACTIVATE_ADMIN', `Administrador reactivado: ${target.rows[0].correo}`, ipAddress]
+    );
+
+    res.json({ message: 'Administrador reactivado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al reactivar administrador' });
+  }
+};
+
+const updateAdminRole = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { rol } = req.body;
+    if (!id || !rol) return res.status(400).json({ error: 'ID y rol requeridos' });
+    if (rol !== 'admin' && rol !== 'superadmin') return res.status(400).json({ error: 'Rol inválido' });
+    
+    const target = await db.query('SELECT correo, rol FROM admins WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'No encontrado' });
+
+    if (target.rows[0].rol === 'superadmin' && rol === 'admin') {
+       const countRes = await db.query("SELECT COUNT(*) as cnt FROM admins WHERE rol = 'superadmin' AND activo = true");
+       if (parseInt(countRes.rows[0].cnt, 10) <= 1) {
+          return res.status(403).json({ error: 'Debe existir siempre al menos un SUPERADMIN activo' });
+       }
+    }
+
+    await db.query('UPDATE admins SET rol = $1 WHERE id = $2', [rol, id]);
+    
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    await db.query(
+      'INSERT INTO audit_logs (usuario, accion, detalles, ip) VALUES ($1, $2, $3, $4)',
+      [req.user.email, 'UPDATE_ADMIN_ROLE', `Rol de ${target.rows[0].correo} cambiado a ${rol}`, ipAddress]
+    );
+
+    res.json({ message: 'Rol de administrador actualizado' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al actualizar rol de administrador' });
+  }
+};
+
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    
+    const target = await db.query('SELECT email FROM users WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    await db.query('DELETE FROM users WHERE id = $1', [id]);
+    
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    await db.query(
+      'INSERT INTO audit_logs (usuario, accion, detalles, ip) VALUES ($1, $2, $3, $4)',
+      [req.user.email, 'DELETE_USER', `Usuario eliminado: ${target.rows[0].email}`, ipAddress]
+    );
+
+    res.json({ message: 'Usuario eliminado exitosamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al eliminar usuario' });
+  }
+};
+
+const reactivateUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!id) return res.status(400).json({ error: 'ID requerido' });
+    
+    const target = await db.query('SELECT email FROM users WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'Usuario no encontrado' });
+
+    await db.query('UPDATE users SET activo = true WHERE id = $1', [id]);
+
+    const ipAddress = req.ip || req.connection.remoteAddress;
+    await db.query(
+      'INSERT INTO audit_logs (usuario, accion, detalles, ip) VALUES ($1, $2, $3, $4)',
+      [req.user.email, 'REACTIVATE_USER', `Usuario reactivado: ${target.rows[0].email}`, ipAddress]
+    );
+
+    res.json({ message: 'Usuario reactivado exitosamente' });
+  } catch (err) {
+    res.status(500).json({ error: 'Error al reactivar usuario' });
+  }
+};
+
 module.exports = {
   getGeneralStats,
   getActiveUsers,
@@ -225,5 +385,11 @@ module.exports = {
   getAuditLogs,
   getAdmins,
   createAdmin,
-  deactivateAdmin
+  deactivateAdmin,
+  reactivateAdmin,
+  deleteAdmin,
+  updateAdminRole,
+  deactivateUser,
+  reactivateUser,
+  deleteUser
 };

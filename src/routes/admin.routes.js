@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const { isSuperAdmin } = require('../middleware/auth.middleware');
 const { 
   getGeneralStats, 
   getActiveUsers, 
@@ -10,7 +11,13 @@ const {
   getAuditLogs,
   getAdmins,
   createAdmin,
-  deactivateAdmin
+  deactivateAdmin,
+  reactivateAdmin,
+  deleteAdmin,
+  updateAdminRole,
+  deleteUser,
+  deactivateUser,
+  reactivateUser
 } = require('../controllers/admin.controller');
 
 // Obtener estadísticas generales
@@ -37,10 +44,32 @@ router.get('/audit', getAuditLogs);
 // Obtener administradores
 router.get('/admins', getAdmins);
 
+// ============================================
+// RUTAS SUPERADMIN
+// ============================================
+
 // Crear administrador
-router.post('/admins', createAdmin);
+router.post('/admins', isSuperAdmin, createAdmin);
 
 // Desactivar administrador
-router.put('/admins/:id/deactivate', deactivateAdmin);
+router.put('/admins/:id/deactivate', isSuperAdmin, deactivateAdmin);
+
+// Reactivar administrador
+router.put('/admins/:id/reactivate', isSuperAdmin, reactivateAdmin);
+
+// Eliminar administrador
+router.delete('/admins/:id', isSuperAdmin, deleteAdmin);
+
+// Cambiar rol de administrador
+router.put('/admins/:id/role', isSuperAdmin, updateAdminRole);
+
+// Desactivar usuario normal
+router.put('/users/:id/deactivate', isSuperAdmin, deactivateUser);
+
+// Reactivar usuario normal
+router.put('/users/:id/reactivate', isSuperAdmin, reactivateUser);
+
+// Eliminar usuario normal
+router.delete('/users/:id', isSuperAdmin, deleteUser);
 
 module.exports = router;

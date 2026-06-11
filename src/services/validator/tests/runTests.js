@@ -48,19 +48,31 @@ const invalidQueries = [
     // Funciones
     { q: "SELECT S(monto) FROM ventas;", expectError: "Función desconocida \"S\"" },
     { q: "SELECT COUNTT(id) FROM tabla;", expectError: "Función desconocida \"COUNTT\"" },
-    { q: "SELECT S() FROM t;", expectError: "Función desconocida \"S\"" }
+    { q: "SELECT S() FROM t;", expectError: "Función desconocida \"S\"" },
+
+    // Identificadores consecutivos (Falta coma)
+    { q: "SELECT nombre direccion FROM usuarios;", expectError: "Coma (,) o AS" },
+    { q: "SELECT a b c d FROM t;", expectError: "Coma (,) o AS" },
+
+    // DDL incompleto
+    { q: "CREATE TABLE;", expectError: "requiere un tipo de objeto" }
 ];
 
 const validMongo = [
     '{\n "find":"usuarios",\n "filter":{\n   "edad":{\n      "$gte":18\n   }\n }\n}',
     'db.usuarios.aggregate([ { $match: { estado: "activo" } } ])',
-    'db.pedidos.find({ "total": { $gt: 100 } })'
+    'db.pedidos.find({ "total": { $gt: 100 } })',
+    'db.ventas.aggregate([ { $match: { anio: 2024 } }, { $group: { _id: "$categoria", total: { $sum: "$monto" } } } ])',
+    'db.clientes.insertOne({ nombre: "María García", email: "maria@example.com", edad: 28, ciudad: "Madrid" })',
+    'db.usuarios.updateOne( { _id: ObjectId("64abc123") }, { $set: { activo: false, fecha_baja: new Date() }, $inc: { intentos_login: 1 } } )'
 ];
 
 const invalidMongo = [
     { q: '{\n "$gteee":18\n}', expectError: 'Quizás quiso escribir: $gte' },
     { q: 'db.usuarios.finnd({ })', expectError: 'Quizás quiso escribir: find' },
-    { q: 'db.users.aggregate([ { $macth: {} } ])', expectError: 'Quizás quiso escribir: $match' }
+    { q: 'db.users.aggregate([ { $macth: {} } ])', expectError: 'Quizás quiso escribir: $match' },
+    { q: 'db.usuarios.selectData({ activo: true })', expectError: 'Comando desconocido "selectData"' },
+    { q: 'db.posts.find({ vistas: { $mayorQue: 100 } })', expectError: 'desconocido' }
 ];
 
 let passed = 0;

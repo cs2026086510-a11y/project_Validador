@@ -27,7 +27,17 @@ const isAdmin = (req, res, next) => {
   }
 };
 
+const isSuperAdmin = (req, res, next) => {
+  const adminEmail = process.env.ADMIN_EMAIL;
+  if (req.user && (req.user.role === 'superadmin' || (adminEmail && req.user.email === adminEmail))) {
+    next();
+  } else {
+    res.status(403).json({ error: 'Requiere permisos de SUPERADMIN' });
+  }
+};
+
 module.exports = {
   verifyToken,
-  isAdmin
+  isAdmin,
+  isSuperAdmin
 };
